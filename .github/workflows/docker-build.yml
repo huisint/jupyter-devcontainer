@@ -40,3 +40,37 @@ jobs:
         org.opencontainers.image.description="The devcontainer base image for Jupyter with `nbconvert --to=${{ matrix.variant }}` available"
       build-args: |
         BASE_IMAGE_TAG=${{ github.ref_name }}
+  build-python:
+    needs:
+      - build-minimal
+      - build-other-bases
+    strategy:
+      fail-fast: false
+      matrix:
+        base:
+          - minimal
+          - pdf
+          - webpdf
+        version:
+          - '3.11'
+          - '3.10'
+          - '3.9'
+          - '3.8'
+    uses: ./.github/workflows/docker-build-reusable.yml
+    with:
+      id: python-${{ matrix.version }}-${{ matrix.base }}
+      name: ghcr.io/${{ github.repository }}/python
+      dockerfile: src/python/Dockerfile
+      context: src/python
+      tags: |
+        type=semver,pattern={{version}},value=${{ matrix.version }}
+        type=semver,pattern={{version}},suffix=${{ matrix.base }}-{{date 'YYYYMMDD'}},value=${{ matrix.version }}
+        type=semver,pattern={{major}}.{{minor}},value=${{ matrix.version }}
+      tag-suffix: ${{ matrix.base == 'minimal' && '' || format('-{0}', matrix.base) }}
+      labels: |
+        org.opencontainers.image.title="Jupyter Devcontainer for Python(${{ matrix.base }})"
+        org.opencontainers.image.description="The devcontainer image for Jupyter with Python"
+      build-args: |
+        PYTHON_VERSION=${{ matrix.version }}
+        BASE_IMAGE_TYPE=${{ matrix.base }}
+        BASE_IMAGE_TAG=${{ github.ref_name }}
