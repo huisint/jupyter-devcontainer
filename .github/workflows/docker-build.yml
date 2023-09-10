@@ -1,0 +1,42 @@
+---
+name: Docker build
+
+on:
+  push:
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+*
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-minimal:
+    uses: ./.github/workflows/docker-build-reusable.yml
+    with:
+      name: ghcr.io/${{ github.repository }}/minimal
+      dockerfile: src/base/minimal/Dockerfile
+      context: src/base/minimal
+      labels: |
+        org.opencontainers.image.title="Jupyter Devcontainer(minimal)"
+        org.opencontainers.image.description="The minimal devcontainer base image for Jupyter"
+  build-other-bases:
+    needs:
+      - build-minimal
+    strategy:
+      fail-fast: false
+      matrix:
+        variant:
+          - pdf
+          - webpdf
+    uses: ./.github/workflows/docker-build-reusable.yml
+    with:
+      id: ${{ matrix.variant }}
+      name: ghcr.io/${{ github.repository }}/${{ matrix.variant }}
+      dockerfile: src/base/${{ matrix.variant }}/Dockerfile
+      context: src/base/${{ matrix.variant }}
+      labels: |
+        org.opencontainers.image.title="Jupyter Devcontainer(${{ matrix.variant }})"
+        org.opencontainers.image.description="The devcontainer base image for Jupyter with `nbconvert --to=${{ matrix.variant }}` available"
+      build-args: |
+        BASE_IMAGE_TAG=${{ github.ref_name }}

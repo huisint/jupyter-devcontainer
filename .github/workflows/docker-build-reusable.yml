@@ -1,0 +1,151 @@
+---
+name: Docker build reusable
+
+on:
+  workflow_call:
+    inputs:
+      id:
+        description: The identifier of image
+        required: false
+        default:
+        type: string
+      name:
+        description: The name of image
+        required: true
+        type: string
+      dockerfile:
+        description: The path to Dockerfile
+        required: false
+        default: Dockerfile
+        type: string
+      context:
+        description: The context for `docker build`
+        required: false
+        default: .
+        type: string
+      build-args:
+        description: The arguments for `--build-arg` option of `docker build`
+        required: false
+        default:
+        type: string
+      tag-prefix:
+        description: The prefix of the image tag
+        required: false
+        default:
+        type: string
+      tag-suffix:
+        description: The suffix of the image tag
+        required: false
+        default:
+        type: string
+      tags:
+        description: Additional tags
+        required: false
+        default:
+        type: string
+      labels:
+        description: Additional labels
+        required: false
+        default:
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      - name: Docker meta
+        uses: docker/metadata-action@v4
+        id: meta
+        with:
+          images: ${{ inputs.name }}
+          labels: |
+            org.opencontainers.image.vendor=${{ github.repository_owner }}
+            org.opencontainers.image.source=${{ github.repositoryUrl }}/blob/${{ github.ref_name }}/${{ inputs.dockerfile }}
+            ${{ inputs.labels }}
+      - name: Docker login
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v4
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            ${{ inputs.build-args }}
+          outputs: |
+            type=image,name=${{ inputs.name }},push-by-digest=true,name-canonical=true,push=true
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests/${{ inputs.id }}
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${{ inputs.id }}/${digest#sha256:}"
+      - name: Upload digest
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ inputs.id == '' && 'digests' || format('digests-{0}', inputs.id) }}
+          path: ${{ inputs.id == '' && '/tmp/digests' || format('/tmp/digests/{0}', inputs.id) }}
+          if-no-files-found: error
+          retention-days: 1
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs:
+      - build
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v3
+        with:
+          name: ${{ inputs.id == '' && 'digests' || format('digests-{0}', inputs.id) }}
+          path: ${{ inputs.id == '' && '/tmp/digests' || format('/tmp/digests/{0}', inputs.id) }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      - name: Docker meta
+        uses: docker/metadata-action@v4
+        id: meta
+        with:
+          images: ${{ inputs.name }}
+          flavor: |
+            prefix=${{ inputs.tag-prefix }},onlatest=true
+            suffix=${{ inputs.tag-suffix }},onlatest=true
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{version}},suffix=${{ inputs.tag-suffix }}-{{date 'YYYYMMDD'}}
+            type=semver,pattern={{major}}.{{minor}}
+            ${{ inputs.tags }}
+      - name: Docker login
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create manifest list and push
+        working-directory: ${{ inputs.id == '' && '/tmp/digests' || format('/tmp/digests/{0}', inputs.id) }}
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ inputs.name }}@sha256:%s ' *)
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ inputs.name }}:${{ steps.meta.outputs.version }}
