@@ -74,3 +74,37 @@ jobs:
         PYTHON_VERSION=${{ matrix.version }}
         BASE_IMAGE_TYPE=${{ matrix.base }}
         BASE_IMAGE_TAG=${{ github.ref_name }}
+  build-julia:
+    needs:
+      - build-minimal
+      - build-other-bases
+    strategy:
+      fail-fast: false
+      matrix:
+        base:
+          - minimal
+          - pdf
+          - webpdf
+        version:
+          - '1.9'
+          - '1.8'
+          - '1.7'
+          - '1.6'
+    uses: ./.github/workflows/docker-build-reusable.yml
+    with:
+      id: julia-${{ matrix.version }}-${{ matrix.base }}
+      name: ghcr.io/${{ github.repository }}/julia
+      dockerfile: src/julia/Dockerfile
+      context: src/julia
+      tags: |
+        type=semver,pattern={{version}},value=${{ matrix.version }}
+        type=semver,pattern={{version}},suffix=${{ matrix.base }}-{{date 'YYYYMMDD'}},value=${{ matrix.version }}
+        type=semver,pattern={{major}}.{{minor}},value=${{ matrix.version }}
+      tag-suffix: ${{ matrix.base == 'minimal' && '' || format('-{0}', matrix.base) }}
+      labels: |
+        org.opencontainers.image.title="Jupyter Devcontainer for Julia(${{ matrix.base }})"
+        org.opencontainers.image.description="The devcontainer image for Jupyter with Julia"
+      build-args: |
+        JULIA_VERSION=${{ matrix.version }}
+        BASE_IMAGE_TYPE=${{ matrix.base }}
+        BASE_IMAGE_TAG=${{ github.ref_name }}
