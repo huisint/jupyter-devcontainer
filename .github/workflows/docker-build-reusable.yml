@@ -101,7 +101,7 @@ jobs:
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${{ inputs.id }}/${digest#sha256:}"
       - name: Upload digest
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.id == '' && 'digests' || format('digests-{0}', inputs.id) }}
           path: ${{ inputs.id == '' && '/tmp/digests' || format('/tmp/digests/{0}', inputs.id) }}
